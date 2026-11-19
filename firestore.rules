@@ -1,0 +1,22 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Qualquer pessoa com o link pode ler, registrar e remover pagamentos
+    // (mesmo comportamento do artefato original), mas só com o formato esperado.
+    match /pagamentos/{id} {
+      allow read, delete: if true;
+      allow create: if request.resource.data.keys().hasOnly(['pid', 'type', 'amount', 'ts'])
+        && request.resource.data.pid in ['gabi', 'mari', 'joyce', 'fernando', 'vinicius']
+        && request.resource.data.type in ['parcela', 'antecipacao']
+        && request.resource.data.amount is number
+        && request.resource.data.amount > 0
+        && request.resource.data.amount < 10000
+        && request.resource.data.ts is int;
+      allow update: if false;
+    }
+    // Todo o resto fica bloqueado.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

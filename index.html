@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Controle de Parcelas</title>
+<style>
+:root{--bg:#f6f5f1;--card:#fff;--tx:#1d1d1b;--mut:#6b6a65;--bd:#e4e2da;--ac:#2f6f4f;--acl:#e3f1ea;--wa:#b4541a;--wal:#fbeadd;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#171715;--card:#222220;--tx:#f0efea;--mut:#a09f98;--bd:#34332f;--ac:#6fcf9b;--acl:#1f3a2c;--wa:#f0a070;--wal:#3d2a1c}}
+:root[data-theme="dark"]{--bg:#171715;--card:#222220;--tx:#f0efea;--mut:#a09f98;--bd:#34332f;--ac:#6fcf9b;--acl:#1f3a2c;--wa:#f0a070;--wal:#3d2a1c}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:760px;margin:0 auto;padding:20px 14px 40px}
+h1{font-size:22px;margin:0 0 4px}.sub{color:var(--mut);margin:0 0 16px}
+.top{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:16px;margin-bottom:14px}
+.hd{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+.hd b{font-size:18px}.tag{font-size:12px;color:var(--mut)}
+.bar{height:10px;background:var(--bd);border-radius:6px;overflow:hidden;margin:10px 0}
+.bar i{display:block;height:100%;background:var(--ac)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin:8px 0 12px}
+.st{background:var(--bg);border-radius:10px;padding:8px 10px}.st small{display:block;color:var(--mut);font-size:12px}.st b{font-size:16px}
+.months{display:flex;gap:5px;flex-wrap:wrap;margin:8px 0 12px}
+.m{font-size:11px;padding:4px 6px;border-radius:7px;border:1px solid var(--bd);text-align:center;min-width:58px}
+.m.ok{background:var(--acl);border-color:var(--ac);color:var(--ac)}.m.pen{background:var(--wal);border-color:var(--wa);color:var(--wa)}
+.m span{display:block;font-weight:600;font-size:12px}
+.row{display:flex;gap:6px;flex-wrap:wrap}
+button,input{font:inherit;border-radius:9px;border:1px solid var(--bd);padding:8px 11px;background:var(--card);color:var(--tx)}
+button{cursor:pointer}button.p{background:var(--ac);color:var(--bg);border-color:var(--ac);font-weight:600}
+input{flex:1;min-width:110px}
+details{margin-top:10px}summary{cursor:pointer;color:var(--mut)}
+.h{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--bd);font-size:14px}
+.h button{padding:2px 8px;font-size:12px}
+.note{font-size:12px;color:var(--mut);margin-top:6px}
+</style></head><body><main>
+<h1>Controle de parcelas</h1>
+<p class="sub">Parcela do mês + antecipações que abatem o saldo final.</p>
+<div class="top"><label>Mês da 1ª parcela <input type="month" id="start" value="2026-12" style="flex:none;min-width:0"></label><span class="note" id="sync"></span></div>
+<div id="list"></div>
+<p class="note">Antecipações abatem as últimas parcelas (de trás pra frente). O pagamento da parcela do mês quita a próxima parcela em aberto.</p>
+</main>
+<script type="module">
+import { firebaseConfig } from "./firebase-config.js";
+
+const PEOPLE=[
+ {id:"gabi",n:"Gabi",q:"Triplo",a:333.80,b:141.90},
+ {id:"mari",n:"Mari",q:"Triplo",a:333.80,b:141.90},
+ {id:"joyce",n:"Joyce",q:"Triplo",a:333.80,b:141.90},
+ {id:"fernando",n:"Fernando",q:"Duplo",a:361.80,b:153.80},
+ {id:"vinicius",n:"Vinicius",q:"Duplo",a:361.80,b:153.80}];
+const COL="pagamentos";
+const brl=v=>v.toLocaleString("pt-BR",{style:"currency",currency:"BRL"});
+const MN=["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
+let entries=[],fs=null,startV="2026-12";
+function lsGet(k){try{return localStorage.getItem(k)}catch(e){return null}}
+function lsSet(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+function monthLabel(i){const[y,m]=startV.split("-").map(Number);const d=new Date(y,m-1+i,1);return MN[d.getMonth()]+"/"+String(d.getFullYear()).slice(2)}
+function calc(p){
+ const inst=[...Array(12).fill(p.a),...Array(3).fill(p.b)].map(v=>Math.round(v*100));
+ const mine=entries.filter(e=>e.pid===p.id);
+ const nPar=mine.filter(e=>e.type==="parcela").length;
+ const ant=mine.filter(e=>e.type==="antecipacao").reduce((s,e)=>s+Math.round(e.amount*100),0);
+ const rem=inst.map((v,i)=>i<nPar?0:v);
+ let left=ant;for(let i=14;i>=nPar&&left>0;i--){const t=Math.min(rem[i],left);rem[i]-=t;left-=t}
+ const total=inst.reduce((a,b)=>a+b,0);
+ const saldo=rem.reduce((a,b)=>a+b,0);
+ const nextIdx=rem.findIndex((v,i)=>i>=nPar&&v>0);
+ return{inst,rem,nPar,ant,total,saldo,nextIdx,extra:left,mine};
+}
+function render(){
+ const el=document.getElementById("list");
+ el.innerHTML=PEOPLE.map(p=>{
+  const c=calc(p),pct=Math.min(100,(1-c.saldo/c.total)*100);
+  const months=c.inst.map((v,i)=>{const ok=c.rem[i]===0;return `<div class="m ${ok?"ok":"pen"}">${monthLabel(i)}<span>${ok?(i<c.nPar?"pago":"abatido"):brl(c.rem[i]/100)}</span></div>`}).join("");
+  const next=c.nextIdx>=0?`${monthLabel(c.nextIdx)}: ${brl(c.rem[c.nextIdx]/100)}`:"Quitado 🎉";
+  const hist=c.mine.sort((a,b)=>a.ts-b.ts).map(e=>`<div class="h"><span>${new Date(e.ts).toLocaleDateString("pt-BR")} · ${e.type==="parcela"?"Parcela":"Antecipação"} · ${brl(e.amount)}</span><button data-del="${e.id}">remover</button></div>`).join("")||'<div class="note">Nenhum pagamento ainda.</div>';
+  return `<div class="card"><div class="hd"><b>${p.n}</b><span class="tag">Quarto ${p.q} · 12× ${brl(p.a)} + 3× ${brl(p.b)}</span></div>
+  <div class="bar"><i style="width:${pct}%"></i></div>
+  <div class="stats"><div class="st"><small>Saldo devedor</small><b>${brl(c.saldo/100)}</b></div>
+  <div class="st"><small>Parcelas pagas</small><b>${Math.min(c.nPar,15)} de 15</b></div>
+  <div class="st"><small>Antecipado</small><b>${brl(c.ant/100)}</b></div>
+  <div class="st"><small>Próxima parcela</small><b style="font-size:14px">${next}</b></div></div>
+  <div class="months">${months}</div>
+  <div class="row"><button class="p" data-par="${p.id}">Registrar parcela do mês</button></div>
+  <div class="row" style="margin-top:8px"><input type="number" step="0.01" min="0" placeholder="Valor antecipado (R$)" id="a-${p.id}"><button data-ant="${p.id}">Antecipar</button></div>
+  ${c.extra>0?'<div class="note">Antecipação excede o saldo; confira os valores.</div>':""}
+  <details><summary>Histórico (${c.mine.length})</summary>${hist}</details></div>`}).join("");
+}
+async function add(pid,type,amount){
+ const id="p"+Date.now()+Math.random().toString(36).slice(2,6);
+ const e={pid,type,amount,ts:Date.now()};
+ if(fs){try{await fs.setDoc(fs.doc(fs.db,COL,id),e);return}catch(err){console.error(err);alert("Falha ao salvar: "+err.message);return}}
+ entries.push({id,...e});lsSet("pagamentos",JSON.stringify(entries));render();
+}
+async function del(id){
+ if(fs){try{await fs.deleteDoc(fs.doc(fs.db,COL,id));return}catch(err){console.error(err);alert("Falha ao remover: "+err.message);render();return}}
+ entries=entries.filter(e=>e.id!==id);lsSet("pagamentos",JSON.stringify(entries));render();
+}
+document.addEventListener("click",e=>{
+ const t=e.target;
+ if(t.dataset.par){const p=PEOPLE.find(x=>x.id===t.dataset.par),c=calc(p);
+  if(c.nextIdx<0)return;add(p.id,"parcela",c.rem[c.nextIdx]/100)}
+ else if(t.dataset.ant){const inp=document.getElementById("a-"+t.dataset.ant),v=parseFloat(inp.value);
+  if(v>0){add(t.dataset.ant,"antecipacao",v);inp.value=""}}
+ else if(t.dataset.del){
+  if(t.dataset.armed){t.disabled=true;t.textContent="removendo…";del(t.dataset.del);return}
+  t.dataset.armed="1";t.textContent="confirmar?";t.style.color="var(--wa)";t.style.borderColor="var(--wa)";
+  setTimeout(()=>{if(t.isConnected&&!t.disabled){delete t.dataset.armed;t.textContent="remover";t.style.color="";t.style.borderColor=""}},4000);
+ }
+});
+const s=document.getElementById("start");
+s.value=lsGet("start")||startV;startV=s.value;
+s.onchange=()=>{startV=s.value||startV;lsSet("start",startV);render()};
+try{entries=JSON.parse(lsGet("pagamentos")||"[]")}catch(e){entries=[]}
+render();
+
+(async()=>{
+ const sync=document.getElementById("sync");
+ if(!firebaseConfig.projectId){sync.textContent="Modo local (Firebase não configurado)";return}
+ try{
+  const V="10.14.1";
+  const {initializeApp}=await import(`https://www.gstatic.com/firebasejs/${V}/firebase-app.js`);
+  const F=await import(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore.js`);
+  const db=F.getFirestore(initializeApp(firebaseConfig));
+  fs={db,doc:F.doc,setDoc:F.setDoc,deleteDoc:F.deleteDoc};
+  sync.textContent="Conectando…";
+  const t=setTimeout(()=>{sync.textContent="Sem resposta do servidor"},10000);
+  F.onSnapshot(F.collection(db,COL),q=>{clearTimeout(t);
+   entries=q.docs.map(d=>({id:d.id,...d.data()}));render();sync.textContent="Sincronizado"},
+   err=>{clearTimeout(t);console.error(err);fs=null;sync.textContent="Erro no Firebase — modo local"});
+ }catch(err){console.error(err);fs=null;sync.textContent="Falha ao carregar Firebase — modo local"}
+})();
+</script></body></html>
